@@ -37,7 +37,7 @@ SOURCES = {
 }
 
 MAX_ITEMS_PER_FEED = 50
-MAX_MESSAGE_BYTES = 3800  # stay under ntfy's ~4096 byte message limit
+MAX_MESSAGE_BYTES = 2500  # stay well under ntfy's ~4096 byte message limit
 
 
 def fetch_feed(url: str) -> list[dict]:
@@ -83,15 +83,18 @@ def send_message(title: str, body: str) -> None:
         print(f"Failed to send notification: {e}", file=sys.stderr)
 
 
-def chunk_blocks(blocks: list[str]) -> list[str]:
-    """Pack category blocks into message bodies under the byte budget."""
+def chunk_pieces(pieces: list[str]) -> list[str]:
+    """Pack small text pieces (category headers, individual items) into
+    message bodies that each stay under the byte budget. Any single piece
+    larger than the budget on its own is still kept whole as its own chunk,
+    but that should not happen for normal category headers/items."""
     chunks = []
     current = ""
-    for block in blocks:
-        candidate = block if not current else current + "\n\n" + block
+    for piece in pieces:
+        candidate = piece if not current else current + "\n" + piece
         if len(candidate.encode("utf-8")) > MAX_MESSAGE_BYTES and current:
             chunks.append(current)
-            current = block
+            current = piece
         else:
             current = candidate
     if current:
@@ -100,21 +103,20 @@ def chunk_blocks(blocks: list[str]) -> list[str]:
 
 
 def notify_source(source: str, items_by_category: dict) -> int:
-    blocks = []
+    pieces = []
     total = 0
     for category, items in items_by_category.items():
         if not items:
             continue
-        lines = [f"== {category} =="]
+        pieces.append(f"== {category} ==")
         for item in items:
-            lines.append(f"- {item['title']}\n  {item['link']}")
+            pieces.append(f"- {item['title']}\n  {item['link']}")
             total += 1
-        blocks.append("\n".join(lines))
 
-    if not blocks:
+    if not pieces:
         return 0
 
-    chunks = chunk_blocks(blocks)
+    chunks = chunk_pieces(pieces)
     n = len(chunks)
     for i, chunk in enumerate(chunks, 1):
         title = f"{source} - Tin moi ({total})"
