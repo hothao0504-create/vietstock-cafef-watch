@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch latest news from Vietstock, CafeF and VietnamFinance RSS feeds, grouped
+"""Fetch latest news from VietnamFinance and VnEconomy RSS feeds, grouped
 by category, and notify new items via ntfy.sh — one notification thread per
 source. Also checks the VN-Index snapshot and notifies when it changes."""
 import json
@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "state", "seen_links.json")
 INDEX_STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "state", "last_index.json")
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "Tong-hop-VIETSTOCK-CAFEF")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "Thong-tin-Tai-chinh")
 NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 VNINDEX_URL = (
     "https://cafef.vn/du-lieu/Ajax/PageNew/DataHistory/PriceHistory.ashx"
@@ -20,32 +20,6 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # Ordered category -> RSS feed. Order defines the grouping order in notifications.
 SOURCES = {
-    "Vietstock": {
-        "Chung khoan": "https://vietstock.vn/144/chung-khoan.rss",
-        "Doanh nghiep": "https://vietstock.vn/733/doanh-nghiep.rss",
-        "Bat dong san": "https://vietstock.vn/763/bat-dong-san.rss",
-        "Tai chinh": "https://vietstock.vn/734/tai-chinh.rss",
-        "Hang hoa": "https://vietstock.vn/2/hang-hoa.rss",
-        "Kinh te": "https://vietstock.vn/5307/kinh-te.rss",
-        "The gioi": "https://vietstock.vn/736/the-gioi.rss",
-        "Dong Duong": "https://vietstock.vn/1317/dong-duong.rss",
-        "Tai chinh ca nhan": "https://vietstock.vn/4259/tai-chinh-ca-nhan.rss",
-        "Phan tich": "https://vietstock.vn/579/nhan-dinh-phan-tich.rss",
-    },
-    "CafeF": {
-        "Xa hoi": "https://cafef.vn/xa-hoi.rss",
-        "Thi truong chung khoan": "https://cafef.vn/thi-truong-chung-khoan.rss",
-        "Bat dong san": "https://cafef.vn/bat-dong-san.rss",
-        "Doanh nghiep": "https://cafef.vn/doanh-nghiep.rss",
-        "Tai chinh - ngan hang": "https://cafef.vn/tai-chinh-ngan-hang.rss",
-        "Tai chinh quoc te": "https://cafef.vn/tai-chinh-quoc-te.rss",
-        "Smart Money": "https://cafef.vn/smart-money.rss",
-        "Kinh te vi mo - Dau tu": "https://cafef.vn/vi-mo-dau-tu.rss",
-        "Kinh te so": "https://cafef.vn/kinh-te-so.rss",
-        "Thi truong": "https://cafef.vn/thi-truong.rss",
-        "Song": "https://cafef.vn/song.rss",
-        "Lifestyle": "https://cafef.vn/lifestyle.rss",
-    },
     "VietnamFinance": {
         "Chung khoan": "https://vietnamfinance.vn/chung-khoan.rss",
         "Tai chinh": "https://vietnamfinance.vn/tai-chinh.rss",
