@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch latest news from VietnamFinance and VnEconomy RSS feeds, grouped
+"""Fetch latest news from Vietnamese finance/stock-market RSS feeds, grouped
 by category, and notify new items via ntfy.sh — one notification thread per
 source. Also checks the VN-Index snapshot and notifies when it changes."""
 import json
@@ -34,6 +34,63 @@ SOURCES = {
         "The gioi": "https://vneconomy.vn/the-gioi.rss",
         "Doanh nhan": "https://vneconomy.vn/doanh-nhan.rss",
     },
+    "CafeF": {
+        "Thi truong chung khoan": "https://cafef.vn/thi-truong-chung-khoan.rss",
+        "Bat dong san": "https://cafef.vn/bat-dong-san.rss",
+        "Doanh nghiep": "https://cafef.vn/doanh-nghiep.rss",
+        "Tai chinh - ngan hang": "https://cafef.vn/tai-chinh-ngan-hang.rss",
+        "Tai chinh quoc te": "https://cafef.vn/tai-chinh-quoc-te.rss",
+        "Vi mo - Dau tu": "https://cafef.vn/vi-mo-dau-tu.rss",
+    },
+    "Vietstock": {
+        "Chung khoan": "https://vietstock.vn/144/chung-khoan.rss",
+        "Doanh nghiep": "https://vietstock.vn/733/doanh-nghiep.rss",
+        "Bat dong san": "https://vietstock.vn/763/bat-dong-san.rss",
+        "Tai chinh": "https://vietstock.vn/734/tai-chinh.rss",
+        "Kinh te": "https://vietstock.vn/5307/kinh-te.rss",
+        "Phan tich": "https://vietstock.vn/579/nhan-dinh-phan-tich.rss",
+    },
+    "NguoiDuaTin": {
+        "Kinh te": "https://www.nguoiduatin.vn/rss/kinh-te.rss",
+        "Bat dong san": "https://www.nguoiduatin.vn/rss/kinh-te/bat-dong-san.rss",
+        "Tai chinh - Ngan hang": "https://www.nguoiduatin.vn/rss/kinh-te/tai-chinh-ngan-hang.rss",
+    },
+    "ThoiBaoTaiChinhVietNam": {
+        "Chung khoan": "https://thoibaotaichinhvietnam.vn/chung-khoan/rss_feed/",
+        "Ngan hang": "https://thoibaotaichinhvietnam.vn/ngan-hang/rss_feed/",
+        "Bat dong san": "https://thoibaotaichinhvietnam.vn/bat-dong-san/rss_feed/",
+        "Thi truong": "https://thoibaotaichinhvietnam.vn/thi-truong/rss_feed/",
+    },
+    "MekongASEAN": {
+        "Kinh doanh": "https://mekongasean.vn/kinh-doanh/rss_feed/",
+        "Chung khoan": "https://mekongasean.vn/chung-khoan/rss_feed/",
+        "Tai chinh": "https://mekongasean.vn/tai-chinh/rss_feed/",
+        "Ngan hang": "https://mekongasean.vn/ngan-hang/rss_feed/",
+        "Bat dong san": "https://mekongasean.vn/bat-dong-san/rss_feed/",
+    },
+    "VietnamBiz": {
+        "Chung khoan": "https://vietnambiz.vn/chung-khoan.rss",
+        "Tai chinh": "https://vietnambiz.vn/tai-chinh.rss",
+        "Ngan hang": "https://vietnambiz.vn/ngan-hang.rss",
+        "Bat dong san": "https://vietnambiz.vn/bat-dong-san.rss",
+        "Doanh nghiep": "https://vietnambiz.vn/doanh-nghiep.rss",
+    },
+    "ThoiBaoNganHang": {
+        "Tien te - Ngan hang": "https://thoibaonganhang.vn/tien-te-ngan-hang/rss_feed/",
+        "Chung khoan": "https://thoibaonganhang.vn/chung-khoan/rss_feed/",
+        "Bat dong san": "https://thoibaonganhang.vn/bat-dong-san/rss_feed/",
+        "Tai chinh": "https://thoibaonganhang.vn/tai-chinh/rss_feed/",
+        "Kinh te": "https://thoibaonganhang.vn/kinh-te/rss_feed/",
+    },
+    "TinNhanhChungKhoan": {
+        "Trang chu": "https://www.tinnhanhchungkhoan.vn/rss/home.rss",
+    },
+    "NguoiQuanSat": {
+        "Chung khoan": "https://nguoiquansat.vn/rss/chung-khoan",
+        "Bat dong san": "https://nguoiquansat.vn/rss/bat-dong-san",
+        "Tai chinh - Ngan hang": "https://nguoiquansat.vn/rss/tai-chinh-ngan-hang",
+        "Doanh nghiep": "https://nguoiquansat.vn/rss/doanh-nghiep",
+    },
 }
 
 MAX_ITEMS_PER_FEED = 50
@@ -44,7 +101,15 @@ def fetch_feed(url: str) -> list[dict]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=20) as resp:
         data = resp.read()
-    root = ET.fromstring(data)
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        # Some feeds mislabel their XML declaration encoding (e.g. claim
+        # utf-16 while the body is actually utf-8) - decode as utf-8 and
+        # strip the declaration so ElementTree doesn't re-check it.
+        text = data.decode("utf-8", errors="replace")
+        text = text.split("?>", 1)[-1] if text.startswith("<?xml") else text
+        root = ET.fromstring(text)
     items = []
     for item in root.findall("./channel/item")[:MAX_ITEMS_PER_FEED]:
         title = (item.findtext("title") or "").strip()
