@@ -25,6 +25,7 @@ FEEDS = {
 }
 
 MAX_ITEMS_PER_FEED = 30
+MAX_NOTIFY_ITEMS = 20
 
 
 def fetch_feed(url: str) -> list[dict]:
@@ -54,28 +55,31 @@ def save_seen(seen: set) -> None:
         json.dump(sorted(seen)[-5000:], f, ensure_ascii=False, indent=2)
 
 
-def notify(source: str, title: str, link: str) -> None:
+def notify_batch(items: list[dict]) -> None:
+    lines = []
+    for item in items:
+        lines.append(f"[{item['source']}] {item['title']}\n{item['link']}")
+    body = "\n\n".join(lines)
     req = urllib.request.Request(
         NTFY_URL,
-        data=title.encode("utf-8"),
+        data=body.encode("utf-8"),
         method="POST",
         headers={
-            "Title": f"{source} - Tin moi",
-            "Click": link,
+            "Title": f"Tin moi ({len(items)})",
             "Content-Type": "text/plain; charset=utf-8",
         },
     )
     try:
         urllib.request.urlopen(req, timeout=15)
     except Exception as e:
-        print(f"Failed to notify for {link}: {e}", file=sys.stderr)
+        print(f"Failed to send notification batch: {e}", file=sys.stderr)
 
 
 def main() -> None:
     seen = load_seen()
     is_first_run = len(seen) == 0
     new_seen = set(seen)
-    new_count = 0
+    new_items = []
 
     for source, urls in FEEDS.items():
         for url in urls:
@@ -89,15 +93,22 @@ def main() -> None:
                 if link in seen:
                     continue
                 new_seen.add(link)
-                if not is_first_run:
-                    notify(source, item["title"], link)
-                    new_count += 1
+                new_items.append({"source": source, "title": item["title"], "link": link})
 
     save_seen(new_seen)
     if is_first_run:
         print(f"First run: seeded {len(new_seen)} links, no notifications sent.")
-    else:
-        print(f"Sent {new_count} notifications.")
+        return
+
+    if not new_items:
+        print("Sent 0 notifications.")
+        return
+
+    for i in range(0, len(new_items), MAX_NOTIFY_ITEMS):
+        batch = new_items[i:i + MAX_NOTIFY_ITEMS]
+        notify_batch(batch)
+
+    print(f"Sent {len(new_items)} new items in {(len(new_items) - 1) // MAX_NOTIFY_ITEMS + 1} notification(s).")
 
 
 if __name__ == "__main__":
