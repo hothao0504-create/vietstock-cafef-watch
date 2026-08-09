@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fetch latest news from Vietstock and CafeF RSS feeds and notify new items via ntfy.sh."""
+"""Fetch latest news from Vietstock and CafeF RSS feeds, grouped by category,
+and notify new items via ntfy.sh — one notification thread per source."""
 import json
 import os
 import sys
@@ -11,21 +12,38 @@ NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "Tong-hop-VIETSTOCK-CAFEF")
 NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
-FEEDS = {
-    "Vietstock": [
-        "https://vietstock.vn/830/chung-khoan/co-phieu.rss",
-        "https://vietstock.vn/737/chung-khoan/thi-truong.rss",
-        "https://vietstock.vn/143/kinh-te.rss",
-    ],
-    "CafeF": [
-        "https://cafef.vn/thi-truong-chung-khoan.rss",
-        "https://cafef.vn/tai-chinh-ngan-hang.rss",
-        "https://cafef.vn/vi-mo-dau-tu.rss",
-    ],
+# Ordered category -> RSS feed. Order defines the grouping order in notifications.
+SOURCES = {
+    "Vietstock": {
+        "Chung khoan": "https://vietstock.vn/144/chung-khoan.rss",
+        "Doanh nghiep": "https://vietstock.vn/733/doanh-nghiep.rss",
+        "Bat dong san": "https://vietstock.vn/763/bat-dong-san.rss",
+        "Tai chinh": "https://vietstock.vn/734/tai-chinh.rss",
+        "Hang hoa": "https://vietstock.vn/2/hang-hoa.rss",
+        "Kinh te": "https://vietstock.vn/5307/kinh-te.rss",
+        "The gioi": "https://vietstock.vn/736/the-gioi.rss",
+        "Dong Duong": "https://vietstock.vn/1317/dong-duong.rss",
+        "Tai chinh ca nhan": "https://vietstock.vn/4259/tai-chinh-ca-nhan.rss",
+        "Phan tich": "https://vietstock.vn/579/nhan-dinh-phan-tich.rss",
+    },
+    "CafeF": {
+        "Xa hoi": "https://cafef.vn/xa-hoi.rss",
+        "Thi truong chung khoan": "https://cafef.vn/thi-truong-chung-khoan.rss",
+        "Bat dong san": "https://cafef.vn/bat-dong-san.rss",
+        "Doanh nghiep": "https://cafef.vn/doanh-nghiep.rss",
+        "Tai chinh - ngan hang": "https://cafef.vn/tai-chinh-ngan-hang.rss",
+        "Tai chinh quoc te": "https://cafef.vn/tai-chinh-quoc-te.rss",
+        "Smart Money": "https://cafef.vn/smart-money.rss",
+        "Kinh te vi mo - Dau tu": "https://cafef.vn/vi-mo-dau-tu.rss",
+        "Kinh te so": "https://cafef.vn/kinh-te-so.rss",
+        "Thi truong": "https://cafef.vn/thi-truong.rss",
+        "Song": "https://cafef.vn/song.rss",
+        "Lifestyle": "https://cafef.vn/lifestyle.rss",
+    },
 }
 
-MAX_ITEMS_PER_FEED = 30
-MAX_NOTIFY_ITEMS = 20
+MAX_ITEMS_PER_FEED = 50
+MAX_MESSAGE_BYTES = 3800  # stay under ntfy's ~4096 byte message limit
 
 
 def fetch_feed(url: str) -> list[dict]:
@@ -52,63 +70,99 @@ def load_seen() -> set:
 def save_seen(seen: set) -> None:
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(sorted(seen)[-5000:], f, ensure_ascii=False, indent=2)
+        json.dump(sorted(seen)[-8000:], f, ensure_ascii=False, indent=2)
 
 
-def notify_batch(items: list[dict]) -> None:
-    lines = []
-    for item in items:
-        lines.append(f"[{item['source']}] {item['title']}\n{item['link']}")
-    body = "\n\n".join(lines)
+def send_message(title: str, body: str) -> None:
     req = urllib.request.Request(
         NTFY_URL,
         data=body.encode("utf-8"),
         method="POST",
         headers={
-            "Title": f"Tin moi ({len(items)})",
+            "Title": title,
             "Content-Type": "text/plain; charset=utf-8",
         },
     )
     try:
         urllib.request.urlopen(req, timeout=15)
     except Exception as e:
-        print(f"Failed to send notification batch: {e}", file=sys.stderr)
+        print(f"Failed to send notification: {e}", file=sys.stderr)
+
+
+def chunk_blocks(blocks: list[str]) -> list[str]:
+    """Pack category blocks into message bodies under the byte budget."""
+    chunks = []
+    current = ""
+    for block in blocks:
+        candidate = block if not current else current + "\n\n" + block
+        if len(candidate.encode("utf-8")) > MAX_MESSAGE_BYTES and current:
+            chunks.append(current)
+            current = block
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def notify_source(source: str, items_by_category: dict) -> int:
+    blocks = []
+    total = 0
+    for category, items in items_by_category.items():
+        if not items:
+            continue
+        lines = [f"== {category} =="]
+        for item in items:
+            lines.append(f"- {item['title']}\n  {item['link']}")
+            total += 1
+        blocks.append("\n".join(lines))
+
+    if not blocks:
+        return 0
+
+    chunks = chunk_blocks(blocks)
+    n = len(chunks)
+    for i, chunk in enumerate(chunks, 1):
+        title = f"{source} - Tin moi ({total})"
+        if n > 1:
+            title += f" - phan {i}/{n}"
+        send_message(title, chunk)
+    return total
 
 
 def main() -> None:
     seen = load_seen()
     is_first_run = len(seen) == 0
     new_seen = set(seen)
-    new_items = []
+    total_new = 0
 
-    for source, urls in FEEDS.items():
-        for url in urls:
+    for source, categories in SOURCES.items():
+        items_by_category = {}
+        for category, url in categories.items():
             try:
                 items = fetch_feed(url)
             except Exception as e:
                 print(f"Error fetching {url}: {e}", file=sys.stderr)
                 continue
+            new_items = []
             for item in items:
                 link = item["link"]
-                if link in seen:
+                if link in seen or link in new_seen:
                     continue
                 new_seen.add(link)
-                new_items.append({"source": source, "title": item["title"], "link": link})
+                new_items.append(item)
+            items_by_category[category] = new_items
+
+        if not is_first_run:
+            sent = notify_source(source, items_by_category)
+            total_new += sent
+            print(f"{source}: sent {sent} new items.")
 
     save_seen(new_seen)
     if is_first_run:
         print(f"First run: seeded {len(new_seen)} links, no notifications sent.")
-        return
-
-    if not new_items:
-        print("Sent 0 notifications.")
-        return
-
-    for i in range(0, len(new_items), MAX_NOTIFY_ITEMS):
-        batch = new_items[i:i + MAX_NOTIFY_ITEMS]
-        notify_batch(batch)
-
-    print(f"Sent {len(new_items)} new items in {(len(new_items) - 1) // MAX_NOTIFY_ITEMS + 1} notification(s).")
+    else:
+        print(f"Total new items sent: {total_new}.")
 
 
 if __name__ == "__main__":
