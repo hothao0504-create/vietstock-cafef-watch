@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Fetch latest news from Vietstock and CafeF RSS feeds, grouped by category,
-and notify new items via ntfy.sh — one notification thread per source."""
+"""Fetch latest news from Vietstock, CafeF and VietnamFinance RSS feeds, grouped
+by category, and notify new items via ntfy.sh — one notification thread per
+source. Also checks the VN-Index snapshot and notifies when it changes."""
 import json
 import os
 import sys
@@ -8,8 +9,13 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "state", "seen_links.json")
+INDEX_STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "state", "last_index.json")
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "Tong-hop-VIETSTOCK-CAFEF")
 NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
+VNINDEX_URL = (
+    "https://cafef.vn/du-lieu/Ajax/PageNew/DataHistory/PriceHistory.ashx"
+    "?Symbol=VNINDEX&StartDate=&EndDate=&PageIndex=1&PageSize=1"
+)
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 
 # Ordered category -> RSS feed. Order defines the grouping order in notifications.
@@ -39,6 +45,13 @@ SOURCES = {
         "Thi truong": "https://cafef.vn/thi-truong.rss",
         "Song": "https://cafef.vn/song.rss",
         "Lifestyle": "https://cafef.vn/lifestyle.rss",
+    },
+    "VietnamFinance": {
+        "Chung khoan": "https://vietnamfinance.vn/chung-khoan.rss",
+        "Tai chinh": "https://vietnamfinance.vn/tai-chinh.rss",
+        "Ngan hang": "https://vietnamfinance.vn/ngan-hang.rss",
+        "Bat dong san": "https://vietnamfinance.vn/bat-dong-san.rss",
+        "Tai chinh quoc te": "https://vietnamfinance.vn/tai-chinh-quoc-te.rss",
     },
 }
 
@@ -130,6 +143,60 @@ def notify_source(source: str, items_by_category: dict) -> int:
     return total
 
 
+def fetch_vnindex() -> dict | None:
+    req = urllib.request.Request(VNINDEX_URL, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        payload = json.loads(resp.read())
+    data = payload.get("Data") or {}
+    date_index = data.get("DateIndex")
+    close = data.get("ClosePriceIndex")
+    chg = data.get("ChgIndex")
+    pct = data.get("PctIndex")
+    if date_index is None or close is None:
+        return None
+    return {"date": date_index, "close": close, "chg": chg, "pct": pct}
+
+
+def load_last_index() -> dict | None:
+    if os.path.exists(INDEX_STATE_FILE):
+        with open(INDEX_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def save_last_index(snapshot: dict) -> None:
+    os.makedirs(os.path.dirname(INDEX_STATE_FILE), exist_ok=True)
+    with open(INDEX_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(snapshot, f, ensure_ascii=False, indent=2)
+
+
+def check_vnindex(is_first_run: bool) -> None:
+    try:
+        snapshot = fetch_vnindex()
+    except Exception as e:
+        print(f"Error fetching VN-Index: {e}", file=sys.stderr)
+        return
+    if snapshot is None:
+        return
+
+    last = load_last_index()
+    if last is not None and last.get("date") == snapshot["date"]:
+        return  # already notified for this trading date
+
+    save_last_index(snapshot)
+    if is_first_run:
+        return
+
+    sign = "+" if (snapshot["chg"] or 0) >= 0 else ""
+    body = (
+        f"Ngay: {snapshot['date']}\n"
+        f"Diem: {snapshot['close']}\n"
+        f"Thay doi: {sign}{snapshot['chg']:.2f} ({sign}{snapshot['pct']:.2f}%)"
+    )
+    send_message("VN-Index - Cap nhat", body)
+    print(f"VN-Index: notified update for {snapshot['date']}.")
+
+
 def main() -> None:
     seen = load_seen()
     is_first_run = len(seen) == 0
@@ -159,6 +226,7 @@ def main() -> None:
             print(f"{source}: sent {sent} new items.")
 
     save_seen(new_seen)
+    check_vnindex(is_first_run)
     if is_first_run:
         print(f"First run: seeded {len(new_seen)} links, no notifications sent.")
     else:
