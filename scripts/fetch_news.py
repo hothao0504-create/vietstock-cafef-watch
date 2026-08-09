@@ -53,6 +53,13 @@ SOURCES = {
         "Bat dong san": "https://vietnamfinance.vn/bat-dong-san.rss",
         "Tai chinh quoc te": "https://vietnamfinance.vn/tai-chinh-quoc-te.rss",
     },
+    "VnEconomy": {
+        "Chung khoan": "https://vneconomy.vn/chung-khoan.rss",
+        "Tai chinh": "https://vneconomy.vn/tai-chinh.rss",
+        "Thi truong": "https://vneconomy.vn/thi-truong.rss",
+        "The gioi": "https://vneconomy.vn/the-gioi.rss",
+        "Doanh nhan": "https://vneconomy.vn/doanh-nhan.rss",
+    },
 }
 
 MAX_ITEMS_PER_FEED = 50
